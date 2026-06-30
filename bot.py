@@ -171,3 +171,29 @@ if __name__ == "__main__":
         bot.run(TOKEN)
     else:
         print("HATA: DISCORD_TOKEN bulunamadı!")
+
+@bot.tree.command(name="sendmsg", description="Bot aracılığıyla belirli bir kanala mesaj gönderir.")
+@app_commands.checks.has_permissions(administrator=True) # Sadece yöneticiler kullanabilir
+async def send_msg(interaction: discord.Interaction, channel_id: str, message: str):
+    """
+    channel_id: Mesajın gönderileceği kanalın ID'si
+    message: Gönderilecek mesaj
+    """
+    try:
+        # Kanal ID'sini sayıya çevir
+        target_channel = bot.get_channel(int(channel_id))
+        
+        if not target_channel:
+            await interaction.response.send_message("❌ Kanal bulunamadı! ID'nin doğru olduğundan ve botun o kanalı görebildiğinden emin ol.", ephemeral=True)
+            return
+        
+        # Mesajı gönder
+        await target_channel.send(message)
+        await interaction.response.send_message(f"✅ Mesaj başarıyla <#{channel_id}> kanalına gönderildi.", ephemeral=True)
+        
+    except ValueError:
+        await interaction.response.send_message("❌ Geçersiz kanal ID'si! Lütfen sadece sayı gir.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Botun o kanala mesaj gönderme yetkisi yok!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Bir hata oluştu: {e}", ephemeral=True)
