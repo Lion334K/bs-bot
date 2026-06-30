@@ -62,11 +62,18 @@ async def schedule_bump_in(seconds: float):
 # ───────────────────────────────────────────────
 
 @bot.event
+@bot.event
 async def on_ready():
-    global bump_task
-    print(f"✅ Giriş yapıldı: {bot.user} (ID: {bot.user.id})")
+    global media_loop_running, media_loop_task, bump_task, quiz_state
+    print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     
-    # Slash komutlarını senkronize et
+    # 1. Bildirim Emojisini Gönder
+    log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
+    if log_channel:
+        # Emojiyi doğru formatta (ID'si ile) gönderiyoruz
+        await log_channel.send("<:emoji:1519431905743994900>")
+
+    # 2. Slash Komut Senkronizasyonu
     try:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.clear_commands(guild=guild)
