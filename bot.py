@@ -38,57 +38,69 @@ welcome_message_log: dict = {}
 # ───────────────────────────────────────────────
 
 async def schedule_bump_in(seconds: float):
-    """Belirtilen saniye kadar bekler ve ardından bump kanalına mesaj atar."""
+    """Belirtilen saniye kadar bekler, mesajı atar ve otomatik döngüyü sürdürür."""
+    global bump_task
     try:
         await asyncio.sleep(seconds)
         channel = bot.get_channel(BUMP_CHANNEL_ID)
         if channel:
             await channel.send(BUMP_MESSAGE)
-            print("📢 Bump hatırlatma mesajı başarıyla gönderildi.")
+            print("📢 Bump hatırlatma mesajı gönderildi. Disboard mesaj atmazsa 2 saat sonra tekrar çalışacak şekilde döngü yenileniyor...")
+            
+            # Kendi mesajından 2 saat sonrası için otomatik olarak tekrar kuruyor (Fallback güvencesi)
+            bump_task = asyncio.ensure_future(schedule_bump_in(2 * 60 * 60))
     except asyncio.CancelledError:
         print("🛑 Aktif bump zamanlayıcısı iptal edildi.")
 
 async def check_last_bump_and_schedule():
-    """Kanal geçmişini kontrol ederek dinamik zamanlayıcıyı başlatır veya hemen mesaj atar."""
+    """Hem Disboard hem de Bot geçmişini kontrol ederek akıllı zamanlayıcıyı başlatır."""
     global bump_task
-    # Botun önbelleğinin tam dolması için 3 saniye bekliyoruz
-    await asyncio.sleep(3)
+    await asyncio.sleep(3) # Bot önbelleğinin dolması için kısa bir bekleme
     
     channel = bot.get_channel(BUMP_CHANNEL_ID)
     if not channel:
         print("⚠️ Bump kanalı bulunamadı, geçmiş kontrolü iptal edildi.")
         return
 
-    print("🔍 Son bump mesajı kanal geçmişinden kontrol ediliyor...")
+    print("🔍 Son aktivite (Disboard mesajı veya Bot hatırlatıcısı) kanal geçmişinden kontrol ediliyor...")
     try:
-        async for message in channel.history(limit=25):
+        async for message in channel.history(limit=50):
+            is_target = False
+            
+            # 1. Durum: Mesaj Disboard'un başarılı bump mesajı mı?
             if message.author.id == BUMP_BOT_ID:
-                # Disboard mesajının içeriğini veya embed yapısını kontrol et
-                is_bump_success = False
                 if message.embeds:
                     embed_text = "".join([embed.description or "" for embed in message.embeds]).lower()
                     if "bump done" in embed_text or "başarılı" in embed_text or "👍" in embed_text:
-                        is_bump_success = True
+                        is_target = True
                 elif "bump done" in message.content.lower() or "başarılı" in message.content.lower() or "👍" in message.content:
-                    is_bump_success = True
+                    is_target = True
+            
+            # 2. Durum: Mesaj bizim botun kendi hatırlatma mesajı mı?
+            elif message.author.id == bot.user.id and message.content == BUMP_MESSAGE:
+                is_target = True
 
-                if is_bump_success:
-                    now = datetime.now(timezone.utc)
-                    elapsed = (now - message.created_at).total_seconds()
-                    two_hours = 2 * 60 * 60  # 7200 saniye
-                    
-                    if bump_task and not bump_task.done():
-                        bump_task.cancel()
+            # Eğer en güncel hedef mesajı bulduysak hesaplamayı yapıyoruz
+            if is_target:
+                now = datetime.now(timezone.utc)
+                elapsed = (now - message.created_at).total_seconds()
+                two_hours = 2 * 60 * 60  # 7200 saniye
+                
+                if bump_task and not bump_task.done():
+                    bump_task.cancel()
 
-                    if elapsed >= two_hours:
-                        print("⏰ Son bump üzerinden 2 saatten fazla süre geçmiş! Hatırlatıcı hemen gönderiliyor.")
-                        await channel.send(BUMP_MESSAGE)
-                    else:
-                        remaining = two_hours - elapsed
-                        print(f"⏳ Son bump üzerinden {elapsed/60:.1f} dakika geçmiş. Hatırlatıcı {remaining/60:.1f} dakika sonra gönderilecek.")
-                        bump_task = asyncio.ensure_future(schedule_bump_in(remaining))
-                    return
-        print("📭 Kanal geçmişinde Disboard botuna ait başarılı bir bump izi bulunamadı.")
+                if elapsed >= two_hours:
+                    print("⏰ Son aktivitenin üzerinden 2 saatten fazla süre geçmiş! Hatırlatıcı hemen gönderiliyor.")
+                    await channel.send(BUMP_MESSAGE)
+                    # Mesaj atıldığı için yeni 2 saatlik döngüyü başlatıyoruz
+                    bump_task = asyncio.ensure_future(schedule_bump_in(two_hours))
+                else:
+                    remaining = two_hours - elapsed
+                    print(f"⏳ Son aktiviteden {elapsed/60:.1f} dakika geçmiş. Hatırlatıcı {remaining/60:.1f} dakika sonra gönderilecek.")
+                    bump_task = asyncio.ensure_future(schedule_bump_in(remaining))
+                return
+                
+        print("📭 Kanal geçmişinde ne Disboard ne de bota ait bir iz bulunamadı.")
     except Exception as e:
         print(f"⚠️ Geçmiş kontrolü sırasında hata: {e}")
 
@@ -118,7 +130,7 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Senkronizasyon hatası: {e}")
 
-    # Bot her başladığında geçmişi kontrol eden akıllı fonksiyonu tetikle
+    # Bot her yeniden başladığında geçmişi kontrol eden akıllı fonksiyonu tetikle
     asyncio.ensure_future(check_last_bump_and_schedule())
 
 @bot.event
@@ -142,7 +154,7 @@ async def on_message(message: discord.Message):
             for attachment in message.attachments:
                 await log_channel.send(f"📎 **{message.author.display_name}**", file=await attachment.to_file())
 
-    # Canlı Bump Kontrolü
+    # Canlıde Disboard Mesaj Takibi
     if message.channel.id == BUMP_CHANNEL_ID and message.author.id == BUMP_BOT_ID:
         is_bump_success = False
         if message.embeds:
@@ -153,10 +165,10 @@ async def on_message(message: discord.Message):
             is_bump_success = True
             
         if is_bump_success:
-            print("🔄 Canlıda yeni bir başarılı bump algılandı! 2 saatlik geri sayım sıfırlanıyor...")
+            print("🔄 Canlıda yeni bir başarılı bump algılandı! Sayaç Disboard saatine göre sıfırlanıyor...")
             if bump_task and not bump_task.done():
-                bump_task.cancel()
-            bump_task = asyncio.ensure_future(schedule_bump_in(2 * 60 * 60))
+                bump_task.cancel() # Önceki tüm sayaçları (botun kendi döngüsü dahil) iptal et
+            bump_task = asyncio.ensure_future(schedule_bump_in(2 * 60 * 60)) # Temiz 2 saat başlat
 
     await bot.process_commands(message)
 
